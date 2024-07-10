@@ -33,16 +33,15 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class CalculateAverage_auoie {
 
+  private static final int OPEN_HASHSET_SIZE = 1 << 17; // must be power of 2
+  private static final int BATCH_SIZE = 16 * 1024 * 1024;
+  private static final int INSPECTION_SIZE = 128 * 1024;
   private static final String FILE = "./measurements.txt";
 
-  private record ByteArraySlice(byte[] buffer, int hash, int lo, int hi) {
-    @Override
-    public boolean equals(Object o) {
-      // if (this == o) return true;
-      // if (o == null || getClass() != o.getClass()) return false;
-      ByteArraySlice that = (ByteArraySlice) o;
-      int dif = hi - lo;
-      if (that.hi - that.lo != dif) {
+  private record ByteArraySlice(
+      byte[] buffer, int hash, int lo, int dif, MeasurementAggregator measurement) {
+    public boolean matches(ByteArraySlice that) {
+      if (dif != that.dif) {
         return false;
       }
       for (int i = 0; i < dif; i++) {
@@ -53,18 +52,8 @@ public class CalculateAverage_auoie {
       return true;
     }
 
-    @Override
-    public int hashCode() {
-      return hash;
-    }
-
-    @Override
-    public String toString() {
-      return new String(Arrays.copyOfRange(buffer, lo, hi), StandardCharsets.UTF_8);
-    }
-
     public ByteArrayWrapper getByteArrayWrapper() {
-      return new ByteArrayWrapper(Arrays.copyOfRange(buffer, lo, hi), hash);
+      return new ByteArrayWrapper(Arrays.copyOfRange(buffer, lo, lo + dif), hash);
     }
   }
 
@@ -106,11 +95,11 @@ public class CalculateAverage_auoie {
     private long sum;
     private long count;
 
-    public MeasurementAggregator(int value) {
-      sum = value;
-      min = value;
-      max = value;
-      count = 1;
+    public MeasurementAggregator() {
+      sum = 0;
+      count = 0;
+      min = Long.MAX_VALUE;
+      max = Long.MIN_VALUE;
     }
 
     private void includeValue(long value) {
@@ -127,6 +116,41 @@ public class CalculateAverage_auoie {
       count += agg.count;
     }
   }
+
+  private static class OpenHashSet {
+    private final ByteArraySlice[] arr;
+    private final List<ByteArraySlice> entries;
+
+    /**
+     * @param length should be power of 2
+     */
+    public OpenHashSet(int length) {
+      arr = new ByteArraySlice[length];
+      entries = new ArrayList<>();
+    }
+
+    public ByteArraySlice getsert(ByteArraySlice value) {
+      int index = value.hash & (arr.length - 1);
+      while (true) {
+        ByteArraySlice newValue = arr[index];
+        if (newValue == null) {
+          arr[index] = value;
+          entries.add(value);
+          return value;
+        }
+        if (newValue.matches(value)) {
+          return newValue;
+        }
+        index = (index + 1) & (arr.length - 1);
+      }
+    }
+
+    public List<ByteArraySlice> getEntries() {
+      return entries;
+    }
+  }
+
+  private record Entry<K, V>(K key, V value) {}
 
   private record Task(MappedByteBuffer buffer, int length) {}
 
@@ -191,11 +215,10 @@ public class CalculateAverage_auoie {
     return allAggs;
   }
 
-  private record Entry<K, V>(K key, V value) {}
-
   private static List<Entry<ByteArrayWrapper, MeasurementAggregator>> getAggregateForBuffer(
       byte[] buffer, int length) {
-    HashMap<ByteArraySlice, MeasurementAggregator> aggs = new HashMap<>();
+    // HashMap<ByteArraySlice, MeasurementAggregator> aggs = new HashMap<>();
+    OpenHashSet aggs = new OpenHashSet(OPEN_HASHSET_SIZE);
     int index = 0;
     while (index < length) {
       int start = index;
@@ -221,19 +244,16 @@ public class CalculateAverage_auoie {
         intValue = -intValue;
       }
       index++;
-      var station = new ByteArraySlice(buffer, hash, start, end);
-      var agg = aggs.get(station);
-      if (agg == null) {
-        aggs.put(station, new MeasurementAggregator(intValue));
-      } else {
-        agg.includeValue(intValue);
-      }
+      var station =
+          new ByteArraySlice(buffer, hash, start, end - start, new MeasurementAggregator());
+      aggs.getsert(station).measurement.includeValue(intValue);
     }
     List<Entry<ByteArrayWrapper, MeasurementAggregator>> entries = new ArrayList<>();
-    aggs.forEach(
-        (key, value) -> {
-          entries.add(new Entry<>(key.getByteArrayWrapper(), value));
-        });
+    aggs.getEntries()
+        .forEach(
+            (entry) -> {
+              entries.add(new Entry<>(entry.getByteArrayWrapper(), entry.measurement));
+            });
     return entries;
   }
 
@@ -263,8 +283,7 @@ public class CalculateAverage_auoie {
   }
 
   private static void memoryMappedFile() throws IOException, InterruptedException {
-    final int BATCH_SIZE = 16 * 1024 * 1024;
-    final int INSPECTION_SIZE = 128 * 1024;
+
     System.err.println("Getting tasks");
     long t0 = System.currentTimeMillis();
     var tasks = getTasks(FILE, BATCH_SIZE, INSPECTION_SIZE);
