@@ -45,7 +45,7 @@ public class CalculateAverage_auoie {
       if (that.hi - that.lo != dif) {
         return false;
       }
-      for (int i = 0; i <= dif; i++) {
+      for (int i = 0; i < dif; i++) {
         if (buffer[lo + i] != that.buffer[that.lo + i]) {
           return false;
         }
@@ -160,30 +160,31 @@ public class CalculateAverage_auoie {
     List<List<Entry<ByteArrayWrapper, MeasurementAggregator>>> allAggs = new ArrayList<>();
     ReentrantLock lock = new ReentrantLock();
     List<Thread> threadPool = new ArrayList<>();
-    for (int i = 0; i < numWorkers; i++) {
-      threadPool.add(
-          new Thread(
-              () -> {
-                byte[] buffer = new byte[maxBufferSize];
-                while (true) {
-                  var task = taskQueue.poll();
-                  if (task == null) {
-                    return;
-                  }
-                  task.buffer.get(buffer, 0, task.length);
-                  var aggs = getAggregateForBuffer(buffer, task.length);
-                  try {
-                    lock.lock();
-                    allAggs.add(aggs);
-                  } finally {
-                    lock.unlock();
-                  }
-                }
-              }));
+    Runnable runnable =
+        () -> {
+          byte[] buffer = new byte[maxBufferSize];
+          while (true) {
+            var task = taskQueue.poll();
+            if (task == null) {
+              break;
+            }
+            task.buffer.get(buffer, 0, task.length);
+            var aggs = getAggregateForBuffer(buffer, task.length);
+            try {
+              lock.lock();
+              allAggs.add(aggs);
+            } finally {
+              lock.unlock();
+            }
+          }
+        };
+    for (int i = 0; i < numWorkers - 1; i++) {
+      threadPool.add(new Thread(runnable));
     }
     for (var thread : threadPool) {
       thread.start();
     }
+    runnable.run();
     for (var thread : threadPool) {
       thread.join();
     }
@@ -262,7 +263,7 @@ public class CalculateAverage_auoie {
   }
 
   private static void memoryMappedFile() throws IOException, InterruptedException {
-    final int BATCH_SIZE = 64 * 1024 * 1024;
+    final int BATCH_SIZE = 16 * 1024 * 1024;
     final int INSPECTION_SIZE = 128 * 1024;
     System.err.println("Getting tasks");
     long t0 = System.currentTimeMillis();
