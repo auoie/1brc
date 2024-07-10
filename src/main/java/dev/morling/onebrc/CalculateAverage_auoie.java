@@ -36,15 +36,40 @@ public class CalculateAverage_auoie {
 
   private static final String FILE = "./measurements.txt";
 
-  public static final class ByteArrayWrapper {
-    private final byte[] data;
-    private final int hashCode;
-
-    public ByteArrayWrapper(byte[] data) {
-      this.data = data;
-      this.hashCode = Arrays.hashCode(data);
+  private record ByteArraySlice(byte[] buffer, int hash, int lo, int hi) {
+    @Override
+    public boolean equals(Object o) {
+      // if (this == o) return true;
+      // if (o == null || getClass() != o.getClass()) return false;
+      ByteArraySlice that = (ByteArraySlice) o;
+      int dif = hi - lo;
+      if (that.hi - that.lo != dif) {
+        return false;
+      }
+      for (int i = 0; i <= dif; i++) {
+        if (buffer[lo + i] != that.buffer[that.lo + i]) {
+          return false;
+        }
+      }
+      return true;
     }
 
+    @Override
+    public int hashCode() {
+      return hash;
+    }
+
+    @Override
+    public String toString() {
+      return new String(Arrays.copyOfRange(buffer, lo, hi), StandardCharsets.UTF_8);
+    }
+
+    public ByteArrayWrapper getByteArrayWrapper() {
+      return new ByteArrayWrapper(Arrays.copyOfRange(buffer, lo, hi), hash);
+    }
+  }
+
+  private record ByteArrayWrapper(byte[] data, int hash) {
     @Override
     public boolean equals(Object o) {
       if (this == o) return true;
@@ -55,7 +80,7 @@ public class CalculateAverage_auoie {
 
     @Override
     public int hashCode() {
-      return hashCode;
+      return hash;
     }
 
     @Override
@@ -121,13 +146,15 @@ public class CalculateAverage_auoie {
 
   private static HashMap<ByteArrayWrapper, MeasurementAggregator> getAggregateForBuffer(
       byte[] buffer) {
-    HashMap<ByteArrayWrapper, MeasurementAggregator> aggs = new HashMap<>();
+    HashMap<ByteArraySlice, MeasurementAggregator> aggs = new HashMap<>();
     int index = 0;
     while (index < buffer.length) {
       int start = index;
-      for (; buffer[index] != ';'; index++) {}
+      int hash = 0;
+      for (; buffer[index] != ';'; index++) {
+        hash = 31 * hash + buffer[index];
+      }
       int end = index;
-      var newCityArray = Arrays.copyOfRange(buffer, start, end);
       index++;
       boolean sign = true;
       if (buffer[index] == '-') {
@@ -144,7 +171,7 @@ public class CalculateAverage_auoie {
         intValue = -intValue;
       }
       index++;
-      var station = new ByteArrayWrapper(newCityArray);
+      var station = new ByteArraySlice(buffer, hash, start, end);
       var agg = aggs.get(station);
       if (agg == null) {
         agg = new MeasurementAggregator();
@@ -154,7 +181,11 @@ public class CalculateAverage_auoie {
         agg.includeValue(intValue);
       }
     }
-    return aggs;
+    HashMap<ByteArrayWrapper, MeasurementAggregator> result = new HashMap<>();
+    for (var pair : aggs.entrySet()) {
+      result.put(pair.getKey().getByteArrayWrapper(), pair.getValue());
+    }
+    return result;
   }
 
   private static List<HashMap<ByteArrayWrapper, MeasurementAggregator>> getAllAggregates(
@@ -162,8 +193,8 @@ public class CalculateAverage_auoie {
     List<HashMap<ByteArrayWrapper, MeasurementAggregator>> allAggs = new ArrayList<>();
     ReentrantLock lock = new ReentrantLock();
     List<Future<?>> tasks = new ArrayList<>();
-    try (final var executor =
-        Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())) {
+    int numWorkers = Runtime.getRuntime().availableProcessors();
+    try (final var executor = Executors.newFixedThreadPool(numWorkers)) {
       for (var buffer : buffers) {
         var task =
             executor.submit(
@@ -214,10 +245,14 @@ public class CalculateAverage_auoie {
     final int BATCH_SIZE = 128 * 1024 * 1024;
     final int INSPECTION_SIZE = 128 * 1024;
     System.err.println("Getting buffers");
+    long t1 = System.currentTimeMillis();
     List<byte[]> buffers = getChunks(FILE, BATCH_SIZE, INSPECTION_SIZE);
+    long t2 = System.currentTimeMillis();
+    System.err.println("Got buffers in ms: " + (t2 - t1));
     System.err.println("Getting aggregates for " + buffers.size() + " buffers");
     List<HashMap<ByteArrayWrapper, MeasurementAggregator>> allAggs = getAllAggregates(buffers);
-    System.err.println("Finished getting all aggregates");
+    long t3 = System.currentTimeMillis();
+    System.err.println("Finished getting all aggregates in ms: " + (t3 - t2));
     var measurements = getResults(allAggs);
     System.out.println(measurements);
   }
