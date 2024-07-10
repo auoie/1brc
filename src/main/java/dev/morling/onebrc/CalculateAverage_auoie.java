@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -37,7 +38,7 @@ public class CalculateAverage_auoie {
 
   public static final class ByteArrayWrapper {
     private final byte[] data;
-    private int hashCode;
+    private final int hashCode;
 
     public ByteArrayWrapper(byte[] data) {
       this.data = data;
@@ -46,12 +47,10 @@ public class CalculateAverage_auoie {
 
     @Override
     public boolean equals(Object o) {
-      // if (this == o) return true;
-      // if (o == null || getClass() != o.getClass()) return false;
-      // ByteArrayWrapper that = (ByteArrayWrapper) o;
-      // return Objects.deepEquals(data, that.data);
       if (this == o) return true;
-      return Arrays.equals(data, ((ByteArrayWrapper) o).data);
+      if (o == null || getClass() != o.getClass()) return false;
+      ByteArrayWrapper that = (ByteArrayWrapper) o;
+      return Objects.deepEquals(data, that.data);
     }
 
     @Override
@@ -67,6 +66,7 @@ public class CalculateAverage_auoie {
 
   private record ResultRow(double min, double mean, double max) {
 
+    @Override
     public String toString() {
       return round(min) + "/" + round(mean) + "/" + round(max);
     }
@@ -77,12 +77,12 @@ public class CalculateAverage_auoie {
   }
 
   private static class MeasurementAggregator {
-    private double min = Double.POSITIVE_INFINITY;
-    private double max = Double.NEGATIVE_INFINITY;
-    private double sum;
+    private long min = Long.MAX_VALUE;
+    private long max = Long.MIN_VALUE;
+    private long sum;
     private long count;
 
-    private void includeValue(double value) {
+    private void includeValue(long value) {
       min = Math.min(min, value);
       max = Math.max(max, value);
       sum += value;
@@ -100,22 +100,22 @@ public class CalculateAverage_auoie {
   private static List<byte[]> getChunks(String fileName, int batch_size, int inspection_size)
       throws IOException {
     List<byte[]> buffers = new ArrayList<>();
-    final FileChannel channel = new FileInputStream(fileName).getChannel();
-    for (long i = 0; i < channel.size(); ) {
-      final long bufSize = Math.min(channel.size() - i, batch_size + inspection_size);
-      MappedByteBuffer buffer = channel.map(MapMode.READ_ONLY, i, bufSize);
-      final int start_inspect = (int) Math.min(batch_size, bufSize - 1);
-      int dif = 0;
-      while (buffer.get(start_inspect + dif) != '\n') {
-        dif++;
+    try (FileChannel channel = new FileInputStream(fileName).getChannel()) {
+      for (long i = 0; i < channel.size(); ) {
+        final long bufSize = Math.min(channel.size() - i, batch_size + inspection_size);
+        MappedByteBuffer buffer = channel.map(MapMode.READ_ONLY, i, bufSize);
+        final int start_inspect = (int) Math.min(batch_size, bufSize - 1);
+        int dif = 0;
+        while (buffer.get(start_inspect + dif) != '\n') {
+          dif++;
+        }
+        int bufLength = start_inspect + dif + 1;
+        byte[] byteBuf = new byte[bufLength];
+        buffer.get(byteBuf, 0, bufLength);
+        buffers.add(byteBuf);
+        i += bufLength;
       }
-      int bufLength = start_inspect + dif + 1;
-      byte[] byteBuf = new byte[bufLength];
-      buffer.get(byteBuf, 0, bufLength);
-      buffers.add(byteBuf);
-      i += bufLength;
     }
-    channel.close();
     return buffers;
   }
 
@@ -126,7 +126,8 @@ public class CalculateAverage_auoie {
     while (index < buffer.length) {
       int start = index;
       for (; buffer[index] != ';'; index++) {}
-      var newCityArray = Arrays.copyOfRange(buffer, start, index);
+      int end = index;
+      var newCityArray = Arrays.copyOfRange(buffer, start, end);
       index++;
       boolean sign = true;
       if (buffer[index] == '-') {
@@ -142,16 +143,15 @@ public class CalculateAverage_auoie {
       if (!sign) {
         intValue = -intValue;
       }
-      var value = ((double) intValue) / 10.0;
       index++;
       var station = new ByteArrayWrapper(newCityArray);
       var agg = aggs.get(station);
       if (agg == null) {
         agg = new MeasurementAggregator();
-        agg.includeValue(value);
+        agg.includeValue(intValue);
         aggs.put(station, agg);
       } else {
-        agg.includeValue(value);
+        agg.includeValue(intValue);
       }
     }
     return aggs;
@@ -203,7 +203,7 @@ public class CalculateAverage_auoie {
     results.forEach(
         (station, agg) -> {
           var resultRow =
-              new ResultRow(agg.min, (Math.round(agg.sum * 10.0) / 10.0) / agg.count, agg.max);
+              new ResultRow(agg.min / 10.0, (agg.sum / 10.0) / agg.count, agg.max / 10.0);
           measurements.put(station.toString(), resultRow);
         });
     return measurements;
@@ -211,7 +211,7 @@ public class CalculateAverage_auoie {
 
   private static void memoryMappedFile()
       throws IOException, ExecutionException, InterruptedException {
-    final int BATCH_SIZE = 64 * 1024 * 1024;
+    final int BATCH_SIZE = 128 * 1024 * 1024;
     final int INSPECTION_SIZE = 128 * 1024;
     System.err.println("Getting buffers");
     List<byte[]> buffers = getChunks(FILE, BATCH_SIZE, INSPECTION_SIZE);

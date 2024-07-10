@@ -4,7 +4,11 @@ target/
 !**/src/test/**/target/
 
 ### IntelliJ IDEA ###
-.idea
+.idea/
+graalvm*
+dev.morling.onebrc*
+*solution.txt
+measurements.txt
 *.iws
 *.iml
 *.ipr
