@@ -101,10 +101,17 @@ public class CalculateAverage_auoie {
   }
 
   private static class MeasurementAggregator {
-    private long min = Long.MAX_VALUE;
-    private long max = Long.MIN_VALUE;
+    private long min;
+    private long max;
     private long sum;
     private long count;
+
+    public MeasurementAggregator(int value) {
+      sum = value;
+      min = value;
+      max = value;
+      count = 1;
+    }
 
     private void includeValue(long value) {
       min = Math.min(min, value);
@@ -147,10 +154,10 @@ public class CalculateAverage_auoie {
     return tasks;
   }
 
-  private static List<HashMap<ByteArrayWrapper, MeasurementAggregator>> getAllAggregates(
+  private static List<List<Entry<ByteArrayWrapper, MeasurementAggregator>>> getAllAggregates(
       List<Task> tasks, int maxBufferSize, int numWorkers) throws InterruptedException {
     ConcurrentLinkedQueue<Task> taskQueue = new ConcurrentLinkedQueue<>(tasks);
-    List<HashMap<ByteArrayWrapper, MeasurementAggregator>> allAggs = new ArrayList<>();
+    List<List<Entry<ByteArrayWrapper, MeasurementAggregator>>> allAggs = new ArrayList<>();
     ReentrantLock lock = new ReentrantLock();
     List<Thread> threadPool = new ArrayList<>();
     for (int i = 0; i < numWorkers; i++) {
@@ -183,7 +190,9 @@ public class CalculateAverage_auoie {
     return allAggs;
   }
 
-  private static HashMap<ByteArrayWrapper, MeasurementAggregator> getAggregateForBuffer(
+  private record Entry<K, V>(K key, V value) {}
+
+  private static List<Entry<ByteArrayWrapper, MeasurementAggregator>> getAggregateForBuffer(
       byte[] buffer, int length) {
     HashMap<ByteArraySlice, MeasurementAggregator> aggs = new HashMap<>();
     int index = 0;
@@ -200,7 +209,8 @@ public class CalculateAverage_auoie {
         sign = false;
         index++;
       }
-      int intValue = 0;
+      int intValue = buffer[index] - '0';
+      index++;
       for (; buffer[index] != '\n'; index++) {
         if (buffer[index] != '.') {
           intValue = 10 * intValue + (buffer[index] - '0');
@@ -213,33 +223,33 @@ public class CalculateAverage_auoie {
       var station = new ByteArraySlice(buffer, hash, start, end);
       var agg = aggs.get(station);
       if (agg == null) {
-        agg = new MeasurementAggregator();
-        agg.includeValue(intValue);
-        aggs.put(station, agg);
+        aggs.put(station, new MeasurementAggregator(intValue));
       } else {
         agg.includeValue(intValue);
       }
     }
-    HashMap<ByteArrayWrapper, MeasurementAggregator> result = new HashMap<>();
-    for (var pair : aggs.entrySet()) {
-      result.put(pair.getKey().getByteArrayWrapper(), pair.getValue());
-    }
-    return result;
+    List<Entry<ByteArrayWrapper, MeasurementAggregator>> entries = new ArrayList<>();
+    aggs.forEach(
+        (key, value) -> {
+          entries.add(new Entry<>(key.getByteArrayWrapper(), value));
+        });
+    return entries;
   }
 
   private static TreeMap<String, ResultRow> getResults(
-      List<HashMap<ByteArrayWrapper, MeasurementAggregator>> allAggs) {
+      List<List<Entry<ByteArrayWrapper, MeasurementAggregator>>> allAggs) {
     HashMap<ByteArrayWrapper, MeasurementAggregator> results = new HashMap<>();
     for (var map : allAggs) {
-      map.forEach(
-          (station, agg) -> {
-            var curAgg = results.get(station);
-            if (curAgg == null) {
-              results.put(station, agg);
-            } else {
-              curAgg.includeAggregate(agg);
-            }
-          });
+      for (var entry : map) {
+        var station = entry.key;
+        var value = entry.value;
+        var curAgg = results.get(station);
+        if (curAgg == null) {
+          results.put(station, value);
+        } else {
+          curAgg.includeAggregate(value);
+        }
+      }
     }
     TreeMap<String, ResultRow> measurements = new TreeMap<>();
     results.forEach(
