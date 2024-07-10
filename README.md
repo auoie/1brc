@@ -24,18 +24,18 @@ ln -s /tmp/measurements.txt measurements.txt
 
 ```bash
 java --version
-# openjdk 21.0.3 2024-04-16
-# OpenJDK Runtime Environment (build 21.0.3+9)
-# OpenJDK 64-Bit Server VM (build 21.0.3+9, mixed mode, sharing)
+# openjdk 21.0.3 2024-04-16 LTS
+# OpenJDK Runtime Environment Corretto-21.0.3.9.1 (build 21.0.3+9-LTS)
+# OpenJDK 64-Bit Server VM Corretto-21.0.3.9.1 (build 21.0.3+9-LTS, mixed mode, sharing)
 javac src/main/java/dev/morling/onebrc/CalculateAverage_auoie.java -d target/classes
 time java -cp target/classes dev.morling.onebrc.CalculateAverage_auoie > mysolution.txt
 ```
 
 ```text
 Getting tasks
-Got 823 tasks in ms: 32
-Finished getting all aggregates in ms: 6589
-java -cp target/classes dev.morling.onebrc.CalculateAverage_auoie >   96.45s user 6.46s system 1430% cpu 7.194 total
+Got 823 tasks in ms: 33
+Finished getting all aggregates in ms: 6808
+java -cp target/classes dev.morling.onebrc.CalculateAverage_auoie >   95.09s user 10.61s system 1420% cpu 7.444 total
 ```
 
 ## GraalVM
@@ -43,10 +43,7 @@ java -cp target/classes dev.morling.onebrc.CalculateAverage_auoie >   96.45s use
 ### Getting
 
 ```bash
-curl -OL https://download.oracle.com/graalvm/21/latest/graalvm-jdk-21_linux-x64_bin.tar.gz
-tar xvf graalvm-jdk-21_linux-x64_bin.tar.gz
-export PATH=$(pwd)/graalvm-jdk-21.0.3+7.1/bin:$PATH
-export JAVA_HOME=$(pwd)/graalvm-jdk-21.0.3+7.1
+sdk install java 21.0.3-graal
 java --version
 # java 21.0.3 2024-04-16 LTS
 # Java(TM) SE Runtime Environment Oracle GraalVM 21.0.3+7.1 (build 21.0.3+7-LTS-jvmci-23.1-b37)
@@ -62,9 +59,9 @@ time java -cp target/classes dev.morling.onebrc.CalculateAverage_auoie > mysolut
 
 ```text
 Getting tasks
-Got 823 tasks in ms: 72
-Finished getting all aggregates in ms: 3863
-java -cp target/classes dev.morling.onebrc.CalculateAverage_auoie >   59.19s user 1.81s system 1162% cpu 5.249 total
+Got 823 tasks in ms: 29
+Finished getting all aggregates in ms: 2940
+java -cp target/classes dev.morling.onebrc.CalculateAverage_auoie >   44.30s user 1.83s system 1302% cpu 3.543 total
 ```
 
 ### GraalVM Native Binary
@@ -76,7 +73,7 @@ time ./dev.morling.onebrc.calculateaverage_auoie > mysolution.txt
 
 ```text
 Getting tasks
-Got 823 tasks in ms: 14
-Finished getting all aggregates in ms: 3670
-./dev.morling.onebrc.calculateaverage_auoie > mysolution.txt  48.89s user 2.55s system 1316% cpu 3.909 total
+Got 823 tasks in ms: 11
+Finished getting all aggregates in ms: 3533
+./dev.morling.onebrc.calculateaverage_auoie > mysolution.txt  46.42s user 2.97s system 1299% cpu 3.800 total
 ```

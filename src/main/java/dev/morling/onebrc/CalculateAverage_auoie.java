@@ -222,30 +222,30 @@ public class CalculateAverage_auoie {
     int index = 0;
     while (index < length) {
       int start = index;
-      int hash = 0;
+      int hash = buffer[index];
+      index++;
       for (; buffer[index] != ';'; index++) {
         hash = 31 * hash + buffer[index];
       }
-      int end = index;
+      int dif = index - start;
       index++;
       boolean sign = true;
       if (buffer[index] == '-') {
         sign = false;
         index++;
       }
-      int intValue = buffer[index] - '0';
-      index++;
-      for (; buffer[index] != '\n'; index++) {
-        if (buffer[index] != '.') {
-          intValue = 10 * intValue + (buffer[index] - '0');
-        }
+      int intValue;
+      if (buffer[index + 1] == '.') {
+        intValue = 10 * buffer[index] + buffer[index + 2] - 11 * '0';
+        index += 4;
+      } else {
+        intValue = 100 * buffer[index] + 10 * buffer[index + 1] + buffer[index + 3] - 111 * '0';
+        index += 5;
       }
       if (!sign) {
         intValue = -intValue;
       }
-      index++;
-      var station =
-          new ByteArraySlice(buffer, hash, start, end - start, new MeasurementAggregator());
+      var station = new ByteArraySlice(buffer, hash, start, dif, new MeasurementAggregator());
       aggs.getsert(station).measurement.includeValue(intValue);
     }
     List<Entry<ByteArrayWrapper, MeasurementAggregator>> entries = new ArrayList<>();
