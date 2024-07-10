@@ -2,8 +2,9 @@
 
 Techniques used:
 
-- Map file to memory. Splits the file into approximately 64MB chunks, where each chunk ends in a new line.
-- Send memory chunks to a fixed thread pool executor to saturate CPUs
+- Map file to memory. Splits the file into approximately 64MB tasks, where each task ends in a new line.
+- Send tasks to a queue being read a thread pool. The threads exit when the queue is empty. These threads saturate the CPU threads.
+- Each thread reuses a buffer to read from the file. This saves memory.
 - Uses custom parser to read in byte arrays for the city names and calculate the double values
 - Uses custom byte array class instead of string for hashmap keys
 
@@ -27,10 +28,10 @@ time java -Xmx60G -cp target/classes dev.morling.onebrc.CalculateAverage_auoie >
 ```
 
 ```
-Getting buffers
-Getting aggregates for 206 buffers
-Finished getting all aggregates
-java -Xmx60G -cp target/classes dev.morling.onebrc.CalculateAverage_auoie >   72.07s user 25.39s system 1013% cpu 9.615 total
+Getting tasks
+Got 206 tasks in ms: 59
+Finished getting all aggregates in ms: 4721
+java -cp target/classes dev.morling.onebrc.CalculateAverage_auoie >   70.27s user 2.54s system 1188% cpu 6.125 total
 ```
 
 ### Graal
@@ -50,8 +51,8 @@ time ./dev.morling.onebrc.calculateaverage_auoie > mysolution.txt
 ```
 
 ```
-Getting buffers
-Getting aggregates for 206 buffers
-Finished getting all aggregates
-./dev.morling.onebrc.calculateaverage_auoie > mysolution.txt  63.02s user 3.34s system 874% cpu 7.587 total
+Getting tasks
+Got 206 tasks in ms: 3
+Finished getting all aggregates in ms: 5865
+./dev.morling.onebrc.calculateaverage_auoie > mysolution.txt  68.78s user 2.22s system 1183% cpu 5.998 total
 ```

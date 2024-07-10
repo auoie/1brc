@@ -27,9 +27,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class CalculateAverage_auoie {
@@ -122,33 +121,73 @@ public class CalculateAverage_auoie {
     }
   }
 
-  private static List<byte[]> getChunks(String fileName, int batch_size, int inspection_size)
+  private record Task(MappedByteBuffer buffer, int length) {}
+
+  private static List<Task> getTasks(String fileName, int batch_size, int inspection_size)
       throws IOException {
-    List<byte[]> buffers = new ArrayList<>();
-    try (FileChannel channel = new FileInputStream(fileName).getChannel()) {
-      for (long i = 0; i < channel.size(); ) {
-        final long bufSize = Math.min(channel.size() - i, batch_size + inspection_size);
-        MappedByteBuffer buffer = channel.map(MapMode.READ_ONLY, i, bufSize);
-        final int start_inspect = (int) Math.min(batch_size, bufSize - 1);
-        int dif = 0;
-        while (buffer.get(start_inspect + dif) != '\n') {
-          dif++;
+    List<Task> tasks = new ArrayList<>();
+    {
+      try (FileInputStream fileStream = new FileInputStream(fileName);
+          FileChannel channel = fileStream.getChannel()) {
+        for (long i = 0; i < channel.size(); ) {
+          final long bufSize = Math.min(channel.size() - i, batch_size + inspection_size);
+          MappedByteBuffer buffer = channel.map(MapMode.READ_ONLY, i, bufSize);
+          final int start_inspect = (int) Math.min(batch_size, bufSize - 1);
+          int dif = 0;
+          while (buffer.get(start_inspect + dif) != '\n') {
+            dif++;
+          }
+          int bufLength = start_inspect + dif + 1;
+          Task task = new Task(buffer, bufLength);
+          tasks.add(task);
+          i += bufLength;
         }
-        int bufLength = start_inspect + dif + 1;
-        byte[] byteBuf = new byte[bufLength];
-        buffer.get(byteBuf, 0, bufLength);
-        buffers.add(byteBuf);
-        i += bufLength;
       }
     }
-    return buffers;
+    return tasks;
+  }
+
+  private static List<HashMap<ByteArrayWrapper, MeasurementAggregator>> getAllAggregates(
+      List<Task> tasks, int maxBufferSize, int numWorkers) throws InterruptedException {
+    ConcurrentLinkedQueue<Task> taskQueue = new ConcurrentLinkedQueue<>(tasks);
+    List<HashMap<ByteArrayWrapper, MeasurementAggregator>> allAggs = new ArrayList<>();
+    ReentrantLock lock = new ReentrantLock();
+    List<Thread> threadPool = new ArrayList<>();
+    for (int i = 0; i < numWorkers; i++) {
+      threadPool.add(
+          new Thread(
+              () -> {
+                byte[] buffer = new byte[maxBufferSize];
+                while (true) {
+                  var task = taskQueue.poll();
+                  if (task == null) {
+                    return;
+                  }
+                  task.buffer.get(buffer, 0, task.length);
+                  var aggs = getAggregateForBuffer(buffer, task.length);
+                  try {
+                    lock.lock();
+                    allAggs.add(aggs);
+                  } finally {
+                    lock.unlock();
+                  }
+                }
+              }));
+    }
+    for (var thread : threadPool) {
+      thread.start();
+    }
+    for (var thread : threadPool) {
+      thread.join();
+    }
+    return allAggs;
   }
 
   private static HashMap<ByteArrayWrapper, MeasurementAggregator> getAggregateForBuffer(
-      byte[] buffer) {
+      byte[] buffer, int length) {
     HashMap<ByteArraySlice, MeasurementAggregator> aggs = new HashMap<>();
     int index = 0;
-    while (index < buffer.length) {
+    while (index < length) {
       int start = index;
       int hash = 0;
       for (; buffer[index] != ';'; index++) {
@@ -188,34 +227,6 @@ public class CalculateAverage_auoie {
     return result;
   }
 
-  private static List<HashMap<ByteArrayWrapper, MeasurementAggregator>> getAllAggregates(
-      List<byte[]> buffers) throws ExecutionException, InterruptedException {
-    List<HashMap<ByteArrayWrapper, MeasurementAggregator>> allAggs = new ArrayList<>();
-    ReentrantLock lock = new ReentrantLock();
-    List<Future<?>> tasks = new ArrayList<>();
-    int numWorkers = Runtime.getRuntime().availableProcessors();
-    try (final var executor = Executors.newFixedThreadPool(numWorkers)) {
-      for (var buffer : buffers) {
-        var task =
-            executor.submit(
-                () -> {
-                  var aggs = getAggregateForBuffer(buffer);
-                  try {
-                    lock.lock();
-                    allAggs.add(aggs);
-                  } finally {
-                    lock.unlock();
-                  }
-                });
-        tasks.add(task);
-      }
-      for (var task : tasks) {
-        task.get();
-      }
-    }
-    return allAggs;
-  }
-
   private static TreeMap<String, ResultRow> getResults(
       List<HashMap<ByteArrayWrapper, MeasurementAggregator>> allAggs) {
     HashMap<ByteArrayWrapper, MeasurementAggregator> results = new HashMap<>();
@@ -240,19 +251,18 @@ public class CalculateAverage_auoie {
     return measurements;
   }
 
-  private static void memoryMappedFile()
-      throws IOException, ExecutionException, InterruptedException {
-    final int BATCH_SIZE = 128 * 1024 * 1024;
+  private static void memoryMappedFile() throws IOException, InterruptedException {
+    final int BATCH_SIZE = 64 * 1024 * 1024;
     final int INSPECTION_SIZE = 128 * 1024;
-    System.err.println("Getting buffers");
+    System.err.println("Getting tasks");
+    long t0 = System.currentTimeMillis();
+    var tasks = getTasks(FILE, BATCH_SIZE, INSPECTION_SIZE);
     long t1 = System.currentTimeMillis();
-    List<byte[]> buffers = getChunks(FILE, BATCH_SIZE, INSPECTION_SIZE);
+    System.err.println("Got " + tasks.size() + " tasks in ms: " + (t1 - t0));
+    int numWorkers = Runtime.getRuntime().availableProcessors();
+    var allAggs = getAllAggregates(tasks, BATCH_SIZE + INSPECTION_SIZE, numWorkers);
     long t2 = System.currentTimeMillis();
-    System.err.println("Got buffers in ms: " + (t2 - t1));
-    System.err.println("Getting aggregates for " + buffers.size() + " buffers");
-    List<HashMap<ByteArrayWrapper, MeasurementAggregator>> allAggs = getAllAggregates(buffers);
-    long t3 = System.currentTimeMillis();
-    System.err.println("Finished getting all aggregates in ms: " + (t3 - t2));
+    System.err.println("Finished getting all aggregates in ms: " + (t2 - t1));
     var measurements = getResults(allAggs);
     System.out.println(measurements);
   }
