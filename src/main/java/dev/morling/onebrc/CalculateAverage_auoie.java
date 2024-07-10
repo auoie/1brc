@@ -44,8 +44,10 @@ public class CalculateAverage_auoie {
       if (dif != that.dif) {
         return false;
       }
+      int thisLo = lo;
+      int thatLo = that.lo;
       for (int i = 0; i < dif; i++) {
-        if (buffer[lo + i] != that.buffer[that.lo + i]) {
+        if (buffer[thisLo++] != buffer[thatLo++]) {
           return false;
         }
       }
